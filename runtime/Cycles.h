@@ -36,18 +36,40 @@ class Cycles {
      * (accessed via the RDTSC instruction).
      */
     static NANOLOG_ALWAYS_INLINE
+    
     uint64_t
     rdtsc()
     {
-#if TESTING
-        if (mockTscValue)
-            return mockTscValue;
-#endif
-        size_t lo, hi;
-        // __asm__ __volatile__("rdtsc" : "=a" (lo), "=d" (hi));
-//        __asm__ __volatile__("rdtscp" : "=a" (lo), "=d" (hi) : : "%rcx");
+    #if defined(__aarch64__) || defined(__arm64__)
+        // ARM64: read the virtual counter-timer register (CNTVCT_EL0).
+        // This is the ARMv8 equivalent of rdtsc; always accessible from
+        // user-space without any kernel module needed.
+        uint64_t val;
+        __asm__ __volatile__("mrs %0, cntvct_el0" : "=r"(val));
+        return val;
+    #elif defined(__x86_64__) || defined(__amd64__)
+        uint32_t lo, hi;
+        __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
         return (((uint64_t)hi << 32) | lo);
-    }
+    #else
+        // Fallback: POSIX monotonic clock (slower but portable)
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
+    #endif
+  }
+    // uint64_t
+//     rdtsc()
+//     {
+// #if TESTING
+//         if (mockTscValue)
+//             return mockTscValue;
+// #endif
+//         size_t lo, hi;
+//         // __asm__ __volatile__("rdtsc" : "=a" (lo), "=d" (hi));
+// //        __asm__ __volatile__("rdtscp" : "=a" (lo), "=d" (hi) : : "%rcx");
+//         return (((uint64_t)hi << 32) | lo);
+//     }
 
     static NANOLOG_ALWAYS_INLINE
     double
@@ -85,13 +107,21 @@ class Cycles {
     double
     getCyclesPerSec()
     {
-#if TESTING
-        if (mockCyclesPerSec != 0.0) {
-            return mockCyclesPerSec;
-        }
-#endif
-        return cyclesPerSec;
-    }
+      #if defined(__aarch64__) || defined(__arm64__)
+      // The ARM generic timer frequency is exposed in CNTFRQ_EL0.
+      uint64_t freq;
+      __asm__ __volatile__("mrs %0, cntfrq_el0" : "=r"(freq));
+      return static_cast<double>(freq);
+      #else
+
+        #if TESTING
+                if (mockCyclesPerSec != 0.0) {
+                    return mockCyclesPerSec;
+                }
+        #endif
+                return cyclesPerSec;
+      #endif
+      }
 };
 
 } // end PerfUtils

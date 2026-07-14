@@ -43,7 +43,7 @@
 #include <stdlib.h>
 #include <syscall.h>
 #include <stdio.h>
-#include <xmmintrin.h>
+// #include <xmmintrin.h>
 
 #include "Cycles.h"
 #include "Log.h"
