@@ -17,6 +17,7 @@
 #define PERFGRAPH_CYCLES_H
 
 #include <stdint.h>
+#include <ctime>
 
 #include "Portability.h"
 
@@ -32,50 +33,47 @@ class Cycles {
     static void init();
 
     /**
-     * Return the current value of the fine-grain CPU cycle counter
-     * (accessed via the RDTSC instruction).
+     * Return the current value of the fine-grain CPU cycle counter.
+     * On ARM64, uses clock_gettime(CLOCK_MONOTONIC_RAW) which returns
+     * nanoseconds directly. On x86_64, uses the RDTSC instruction.
      */
     static NANOLOG_ALWAYS_INLINE
-    
     uint64_t
     rdtsc()
     {
-    #if defined(__aarch64__) || defined(__arm64__)
-        // ARM64: read the virtual counter-timer register (CNTVCT_EL0).
-        // This is the ARMv8 equivalent of rdtsc; always accessible from
-        // user-space without any kernel module needed.
-        uint64_t val;
-        __asm__ __volatile__("mrs %0, cntvct_el0" : "=r"(val));
-        return val;
-    #elif defined(__x86_64__) || defined(__amd64__)
+#if defined(__aarch64__) || defined(__arm64__)
+        // Use CLOCK_MONOTONIC_RAW: nanosecond resolution, not affected
+        // by NTP adjustments. Returns ns since boot.
+        // NOTE: cntvct_el0 was intentionally NOT used here because it
+        // runs at ~24MHz (~42ns resolution) which causes many events to
+        // share identical timestamps. clock_gettime gives true 1ns resolution.
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+        return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL
+               + static_cast<uint64_t>(ts.tv_nsec);
+#elif defined(__x86_64__) || defined(__amd64__)
+#if TESTING
+        if (mockTscValue)
+            return mockTscValue;
+#endif
         uint32_t lo, hi;
         __asm__ __volatile__("rdtsc" : "=a"(lo), "=d"(hi));
-        return (((uint64_t)hi << 32) | lo);
-    #else
-        // Fallback: POSIX monotonic clock (slower but portable)
+        return (static_cast<uint64_t>(hi) << 32) | lo;
+#else
+        // Fallback for other architectures
         struct timespec ts;
         clock_gettime(CLOCK_MONOTONIC, &ts);
-        return (uint64_t)ts.tv_sec * 1000000000ULL + ts.tv_nsec;
-    #endif
-  }
-    // uint64_t
-//     rdtsc()
-//     {
-// #if TESTING
-//         if (mockTscValue)
-//             return mockTscValue;
-// #endif
-//         size_t lo, hi;
-//         // __asm__ __volatile__("rdtsc" : "=a" (lo), "=d" (hi));
-// //        __asm__ __volatile__("rdtscp" : "=a" (lo), "=d" (hi) : : "%rcx");
-//         return (((uint64_t)hi << 32) | lo);
-//     }
+        return static_cast<uint64_t>(ts.tv_sec) * 1000000000ULL
+               + static_cast<uint64_t>(ts.tv_nsec);
+#endif
+    }
 
     static NANOLOG_ALWAYS_INLINE
     double
-    perSecond(){
+    perSecond() {
         return getCyclesPerSec();
     }
+
     static double toSeconds(int64_t cycles, double cyclesPerSec = 0);
     static uint64_t fromSeconds(double seconds, double cyclesPerSec = 0);
     static uint64_t toMicroseconds(uint64_t cycles, double cyclesPerSec = 0);
@@ -86,8 +84,7 @@ class Cycles {
   private:
     Cycles();
 
-    /// Conversion factor between cycles and the seconds; computed by
-    /// Cycles::init.
+    /// Conversion factor between cycles and seconds; computed by Cycles::init.
     static double cyclesPerSec;
 
     /// Used for testing: if nonzero then this will be returned as the result
@@ -100,30 +97,30 @@ class Cycles {
 
   public:
     /**
-     * Returns the conversion factor between cycles in seconds, using
-     * a mock value for testing when appropriate.
+     * Returns the conversion factor between cycles and seconds.
+     * MUST match the unit returned by rdtsc():
+     *   ARM64:  rdtsc() returns nanoseconds  →  1.0e9 cycles per second
+     *   x86_64: rdtsc() returns TSC ticks    →  calibrated GHz value
      */
     static NANOLOG_ALWAYS_INLINE
     double
     getCyclesPerSec()
     {
-      #if defined(__aarch64__) || defined(__arm64__)
-      // The ARM generic timer frequency is exposed in CNTFRQ_EL0.
-      uint64_t freq;
-      __asm__ __volatile__("mrs %0, cntfrq_el0" : "=r"(freq));
-      return static_cast<double>(freq);
-      #else
-
-        #if TESTING
-                if (mockCyclesPerSec != 0.0) {
-                    return mockCyclesPerSec;
-                }
-        #endif
-                return cyclesPerSec;
-      #endif
-      }
+#if defined(__aarch64__) || defined(__arm64__)
+        // rdtsc() returns nanoseconds via clock_gettime(CLOCK_MONOTONIC_RAW),
+        // so there are exactly 1,000,000,000 "cycles" per second.
+        return 1.0e9;
+#else
+#if TESTING
+        if (mockCyclesPerSec != 0.0) {
+            return mockCyclesPerSec;
+        }
+#endif
+        return cyclesPerSec;
+#endif
+    }
 };
 
 } // end PerfUtils
 
-#endif  // RAMCLOUD_CYCLES_H
+#endif  // PERFGRAPH_CYCLES_H
