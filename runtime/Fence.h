@@ -35,7 +35,9 @@ class Fence {
      */
     static void inline lfence()
     {
-        // __asm__ __volatile__("lfence" ::: "memory");
+        #if defined(__x86_64__) || defined(__amd64__)
+            __asm__ __volatile__("lfence" ::: "memory");
+        #endif
     }
 
     /**
@@ -46,7 +48,9 @@ class Fence {
      */
     static void inline sfence()
     {
-        // __asm__ __volatile__("sfence" ::: "memory");
+        #if defined(__x86_64__) || defined(__amd64__)
+            __asm__ __volatile__("sfence" ::: "memory");
+        #endif
     }
 
     /**

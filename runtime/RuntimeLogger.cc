@@ -73,7 +73,12 @@ RuntimeLogger::RuntimeLogger()
         stagingBufferPeekDist[i] = 0;
 
     const char *filename = NanoLogConfig::DEFAULT_LOG_FILE;
-    outputFd = open(filename, NanoLogConfig::FILE_PARAMS, 0666);
+    const char* dsync_env = std::getenv("NANOLOG_DISABLE_DSYNC");
+    if (dsync_env && dsync_env[0] && dsync_env[0] != '\0') {
+        outputFd = open(filename, NanoLogConfig::FILE_PARAMS_WITHOUT_DSYNC, 0666);
+    } else {
+        outputFd = open(filename, NanoLogConfig::FILE_PARAMS, 0666);
+    }
     if (outputFd < 0) {
         fprintf(stderr, "NanoLog could not open the default file location "
                 "for the log file (\"%s\").\r\n Please check the permissions "
@@ -596,7 +601,14 @@ RuntimeLogger::compressionThreadMain() {
             continue;
 
         // Pad the output if necessary
-        if (NanoLogConfig::FILE_PARAMS & O_DIRECT) {
+        int pad_cond;
+        const char* dsync_env = std::getenv("NANOLOG_DISABLE_DSYNC");
+        if (dsync_env && dsync_env[0] && dsync_env[0] != '\0') {
+            pad_cond = NanoLogConfig::FILE_PARAMS_WITHOUT_DSYNC & O_DIRECT;
+        } else {
+            pad_cond = NanoLogConfig::FILE_PARAMS & O_DIRECT;
+        }
+        if (pad_cond) {
             ssize_t bytesOver = bytesToWrite % 512;
 
             if (bytesOver != 0) {
@@ -639,7 +651,13 @@ RuntimeLogger::setLogFile_internal(const char *filename) {
     }
 
     // Try to open the file
-    int newFd = open(filename, NanoLogConfig::FILE_PARAMS, 0666);
+    int newFd;
+    const char* dsync_env = std::getenv("NANOLOG_DISABLE_DSYNC");
+    if (dsync_env && dsync_env[0] && dsync_env[0] != '\0') {
+        newFd = open(filename, NanoLogConfig::FILE_PARAMS_WITHOUT_DSYNC, 0666);
+    } else {
+        newFd = open(filename, NanoLogConfig::FILE_PARAMS, 0666);
+    }
     if (newFd < 0) {
         std::string err = "Unable to open file new log file: '";
         err.append(filename);
